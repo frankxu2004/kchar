@@ -3,9 +3,11 @@ from math import exp
 from keras import initializers, regularizers, activations, constraints
 from keras.engine import Layer, InputSpec
 from keras.models import Model, model_from_json
-from keras.layers import Input, Embedding, TimeDistributed, Dense, Dropout, Reshape, Concatenate, LSTM, Conv2D, MaxPooling2D, BatchNormalization
+from keras.layers import Input, Embedding, TimeDistributed, Dense, Dropout, Reshape, Concatenate, LSTM, Conv2D, \
+    MaxPooling2D, BatchNormalization
 from keras.optimizers import SGD
 from keras import backend as K
+
 
 class Highway(Layer):
     """Densely connected highway network.
@@ -134,37 +136,42 @@ class Highway(Layer):
                   'input_dim': self.input_dim}
         base_config = super(Highway, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-    
+
+
 class sSGD(SGD):
     def __init__(self, scale=1., **kwargs):
         super(sSGD, self).__init__(**kwargs)
         self.scale = scale;
+
     def get_gradients(self, loss, params):
         grads = K.gradients(loss, params)
         if self.scale != 1.:
-            grads = [g*K.variable(self.scale) for g in grads]
+            grads = [g * K.variable(self.scale) for g in grads]
         if hasattr(self, 'clipnorm') and self.clipnorm > 0:
             norm = K.sqrt(sum([K.sum(K.square(g)) for g in grads]))
             grads = [K.switch(norm >= self.clipnorm, g * self.clipnorm / norm, g) for g in grads]
         if hasattr(self, 'clipvalue') and self.clipvalue > 0:
             grads = [K.clip(g, -self.clipvalue, self.clipvalue) for g in grads]
         return grads
-    
+
+
 class sModel(Model):
     def fit_generator(self, generator, steps_per_epoch, epochs, validation_data, validation_steps, opt):
         val_losses = []
         lr = K.get_value(self.optimizer.lr)
         for epoch in range(epochs):
-            super(sModel, self).fit_generator(generator, steps_per_epoch, epochs=epoch+1, verbose=1, initial_epoch=epoch)
+            super(sModel, self).fit_generator(generator, steps_per_epoch, epochs=epoch + 1, verbose=1,
+                                              initial_epoch=epoch)
             val_loss = exp(self.evaluate_generator(validation_data, validation_steps))
             val_losses.append(val_loss)
-            print 'Epoch {}/{}. Validation loss: {}'.format(epoch + 1, epochs, val_loss)
+            print('Epoch {}/{}. Validation loss: {}'.format(epoch + 1, epochs, val_loss))
             if len(val_losses) > 2 and (val_losses[-2] - val_losses[-1]) < opt.decay_when:
                 lr *= opt.learning_rate_decay
                 K.set_value(self.optimizer.lr, lr)
-            if epoch == epochs-1 or epoch % opt.save_every == 0:
+            if epoch == epochs - 1 or epoch % opt.save_every == 0:
                 savefile = '%s/lm_%s_epoch%d_%.2f.h5' % (opt.checkpoint_dir, opt.savefile, epoch + 1, val_loss)
                 self.save_weights(savefile)
+
     @property
     def state_updates_value(self):
         return [K.get_value(a[0]) for a in self.state_updates]
@@ -177,6 +184,7 @@ class sModel(Model):
         with open(name, 'wt') as f:
             f.write(json_string)
 
+
 def load_model(name):
     with open(name, 'rt') as f:
         json_string = f.read()
@@ -186,7 +194,6 @@ def load_model(name):
 
 
 def CNN(seq_length, length, input_size, feature_maps, kernels, x):
-    
     concat_input = []
     for feature_map, kernel in zip(feature_maps, kernels):
         reduced_l = length - kernel + 1
@@ -197,6 +204,7 @@ def CNN(seq_length, length, input_size, feature_maps, kernels, x):
     x = Concatenate()(concat_input)
     x = Reshape((seq_length, sum(feature_maps)))(x)
     return x
+
 
 def LSTMCNN(opt):
     # opt.seq_length = number of time steps (words) in each batch
@@ -221,7 +229,8 @@ def LSTMCNN(opt):
 
     if opt.use_chars:
         chars = Input(batch_shape=(opt.batch_size, opt.seq_length, opt.max_word_l), dtype='int32', name='chars')
-        chars_embedding = TimeDistributed(Embedding(opt.char_vocab_size, opt.char_vec_size, name='chars_embedding'))(chars)
+        chars_embedding = TimeDistributed(Embedding(opt.char_vocab_size, opt.char_vec_size, name='chars_embedding'))(
+            chars)
         cnn = CNN(opt.seq_length, opt.max_word_l, opt.char_vec_size, opt.feature_maps, opt.kernels, chars_embedding)
         if opt.use_words:
             x = Concatenate()([cnn, word_vecs])
@@ -240,7 +249,8 @@ def LSTMCNN(opt):
         x = TimeDistributed(Highway(activation='relu'))(x)
 
     for l in range(opt.num_layers):
-        x = LSTM(opt.rnn_size, activation='tanh', recurrent_activation='sigmoid', return_sequences=True, stateful=True)(x)
+        x = LSTM(opt.rnn_size, activation='tanh', recurrent_activation='sigmoid', return_sequences=True, stateful=True)(
+            x)
 
         if opt.dropout > 0:
             x = Dropout(opt.dropout)(x)

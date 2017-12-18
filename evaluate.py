@@ -2,13 +2,15 @@ import codecs
 import numpy as np
 import re
 import argparse
-import cPickle as pickle
+import pickle
 from model.LSTMCNN import LSTMCNN
-from util.BatchLoaderUnk import Tokens, encoding # needed by pickle.load()
+from util.BatchLoaderUnk import Tokens, encoding  # needed by pickle.load()
 from math import exp
+
 
 def vocab_unpack(vocab):
     return vocab['idx2word'], vocab['word2idx'][()], vocab['idx2char'], vocab['char2idx'][()]
+
 
 class Vocabulary:
     def __init__(self, tokens, vocab_file, max_word_l=65):
@@ -20,27 +22,27 @@ class Vocabulary:
         vocab_mapping = np.load(vocab_file)
         self.idx2word, self.word2idx, self.idx2char, self.char2idx = vocab_unpack(vocab_mapping)
         self.vocab_size = len(self.idx2word)
-        print 'Word vocab size: %d, Char vocab size: %d' % (len(self.idx2word), len(self.idx2char))
+        print('Word vocab size: %d, Char vocab size: %d' % (len(self.idx2word), len(self.idx2char)))
         self.word_vocab_size = len(self.idx2word)
         self.char_vocab_size = len(self.idx2char)
 
     def index(self, word):
-        if word[0] == self.tokens.UNK and len(word) > 1: # unk token with character info available
+        if word[0] == self.tokens.UNK and len(word) > 1:  # unk token with character info available
             word = word[2:]
             w = self.word2idx[self.tokens.UNK]
         else:
             w = self.word2idx[word] if word in self.word2idx else self.word2idx[self.tokens.UNK]
-            
+
         c = np.zeros(self.max_word_l, dtype='int32')
-        chars = [self.char2idx[self.tokens.START]] # start-of-word symbol
+        chars = [self.char2idx[self.tokens.START]]  # start-of-word symbol
         chars += [self.char2idx[char] for char in word if char in self.char2idx]
-        chars.append(self.char2idx[self.tokens.END]) # end-of-word symbol
+        chars.append(self.char2idx[self.tokens.END])  # end-of-word symbol
         if len(chars) >= self.max_word_l:
-            chars[self.max_word_l-1] = self.char2idx[self.tokens.END]
+            chars[self.max_word_l - 1] = self.char2idx[self.tokens.END]
             c = chars[:self.max_word_l]
         else:
             c[:len(chars)] = chars
-            
+
         return w, c
 
     def get_input(self, line):
@@ -55,15 +57,15 @@ class Vocabulary:
             w, c = self.index(rword)
             output_words.append(w)
             output_chars.append(c)
-        if self.tokens.EOS != '':   # PTB does not have <eos> so we add a character for <eos> tokens
-            w, c = self.index(self.tokens.EOS)   # other datasets don't need this
+        if self.tokens.EOS != '':  # PTB does not have <eos> so we add a character for <eos> tokens
+            w, c = self.index(self.tokens.EOS)  # other datasets don't need this
             output_words.append(w)
             output_chars.append(c)
 
         words = np.array(output_words[-1:] + output_words[:-1], dtype='int32')
         chars = np.array(output_chars[-1:] + output_chars[:-1], dtype='int32')[:, np.newaxis, :]
         output = np.array(output_words, dtype='int32')[:, np.newaxis, np.newaxis]
-        return ({'word':words, 'chars':chars}, output)
+        return {'word': words, 'chars': chars}, output
 
 
 class evaluator:
@@ -86,40 +88,41 @@ class evaluator:
             self.model.set_states_value(self.state_mean)
         return self.model.evaluate(x, y, batch_size=1, verbose=0), nwords
 
+
 def main(name, vocabulary, init, text, calc):
-    
     ev = evaluator(name, vocabulary, None if calc else init)
-    
+
     f = codecs.open(text, 'r', encoding)
     if calc:
-        lp = 0;
-        nw = 0;
-        nl = 0;
+        lp = 0
+        nw = 0
+        nl = 0
         state_sum = [np.zeros_like(a) for a in ev.model.state_updates_value]
         for line in f:
             lprob, nwords = ev.logprob(line)
-            lp += lprob*nwords
+            lp += lprob * nwords
             nw += nwords
             for ssum, update in zip(state_sum, ev.model.state_updates_value):
                 ssum += update
             nl += 1
-            print "Perplexity = ", exp(lp/nw), "\t(", nl, ")", ssum[0][0]/nl
+            print("Perplexity = ", exp(lp / nw), "\t(", nl, ")", ssum[0][0] / nl)
 
-        state_mean = [a/nl for a in state_sum]
+        state_mean = [a / nl for a in state_sum]
         np.save(init, state_mean)
     else:
-        lp = 0;
-        nw = 0;
-        nl = 0;
+        lp = 0
+        nw = 0
+        nl = 0
         f.seek(0)
         for line in f:
             lprob, nwords = ev.logprob(line)
-            lp += lprob*nwords
+            lp += lprob * nwords
             nw += nwords
             nl += 1
-            print "Perplexity = ", exp(lp/nw), "\t(", nl, ")"
-        
+            print("Perplexity = ", exp(lp / nw), "\t(", nl, ")")
+
     exit(0)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
